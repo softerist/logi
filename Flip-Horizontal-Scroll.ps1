@@ -141,6 +141,19 @@ function Confirm-ScrollChange {
 
 $global:LASTEXITCODE = 0
 try {
+    $identity = [Security.Principal.WindowsIdentity]::GetCurrent()
+    try {
+        $principal = [Security.Principal.WindowsPrincipal]::new($identity)
+        $isAdministrator = $principal.IsInRole([Security.Principal.WindowsBuiltInRole]::Administrator)
+    } finally {
+        $identity.Dispose()
+    }
+    $needsElevation = !$isAdministrator -and !$WhatIfPreference
+    $adminWarning = 'Open PowerShell as Administrator to change the scroll setting or restart the mouse. This session can check the current setting.'
+    if ($needsElevation) {
+        Write-Warning $adminWarning
+    }
+
     Write-Information 'Looking for the MX Master 4 among connected Windows mouse interfaces.' -InformationAction Continue
     $presentMice = @(Get-ConnectedMouse)
     if ($presentMice.Count -eq 0) {
@@ -202,6 +215,14 @@ try {
         if (!$RestartDevice) {
             return
         }
+    }
+
+    if ($needsElevation) {
+        if ($PSBoundParameters['ErrorAction'] -eq 'Stop') {
+            throw [UnauthorizedAccessException]::new($adminWarning)
+        }
+        $global:LASTEXITCODE = 1
+        return
     }
 
     $action = 'Restart mouse interface'
