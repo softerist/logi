@@ -14,11 +14,12 @@ This downloads and runs the current GitHub version in memory. Review the
 [PowerShell script][script] before running it.
 
 ```powershell
-irm ('https://raw.githubusercontent.com/softerist/logi/main/' +
-    'mx-master-4-revert-horizontal-scroll/Flip-Horizontal-Scroll.ps1') `
-    -ErrorAction Stop |
-    ForEach-Object { iex ("& {`n" + $_ + "`n}") }
+irm 'https://github.com/softerist/logi/raw/main/Flip-Horizontal-Scroll.ps1' | iex
 ```
+
+If Windows shows the Logi Bolt receiver in place of the mouse name, the script
+prompts you to unplug the receiver and reconnect it to the same USB port. It
+checks that the same mouse interface disappears and returns.
 
 The mouse may stop responding briefly while Windows restarts its interface.
 Reboot if the script reports that Windows requires it. Test the thumb wheel in
@@ -43,29 +44,24 @@ the folder containing `Flip-Horizontal-Scroll.ps1`.
 
 ```powershell
 # Preview the target and requested change
-.\Flip-Horizontal-Scroll.ps1 -Value 1 -WhatIf
+.\Flip-Horizontal-Scroll.ps1 -WhatIf
 
 # Explicitly set reversed horizontal scrolling
-.\Flip-Horizontal-Scroll.ps1 -Value 1
+.\Flip-Horizontal-Scroll.ps1
 
 # Restore the standard horizontal scroll direction
 .\Flip-Horizontal-Scroll.ps1 -Value 0
 ```
 
-A run without `-Value` creates the setting with value `1` only if it is missing.
-If the setting already exists, use `-Value 1` to set it explicitly. `-WhatIf`
+The default value is `1`, which reverses horizontal scrolling. `-WhatIf`
 skips the write and restart.
 
-## If automatic detection fails
+## Device selection and restart
 
-Automatic detection looks for the MX Master 4 name in the connected mouse
-interface or its device metadata. If Windows reports a generic name or multiple
-matches, use `-Identify` and follow the prompts to disconnect and reconnect only
-the MX Master 4. Plug the Bolt receiver back into the same port if you unplug it.
-
-```powershell
-.\Flip-Horizontal-Scroll.ps1 -Identify -Value 1
-```
+A [Bolt receiver can pair with multiple devices][bolt]. Use the receiver for
+your MX Master 4 when prompted. If detection still fails, run the local script
+with `-Identify` and follow the prompts to disconnect and reconnect the mouse
+or its receiver.
 
 You can also specify the exact Windows mouse instance ID if you know it.
 
@@ -73,13 +69,14 @@ You can also specify the exact Windows mouse instance ID if you know it.
 .\Flip-Horizontal-Scroll.ps1 -InstanceId '<exact mouse instance ID>' -Value 1
 ```
 
-If the registry write succeeds and the device restart fails, open PowerShell as
-Administrator and retry with `-RestartDevice`. Use the same `-InstanceId` or
-`-Identify` selection if you needed one before.
+If the value is already set and the direction still looks wrong, use
+`-RestartDevice` from an administrator PowerShell to reload the setting. Keep
+the same device selection.
 
 ## License
 
 [MIT](LICENSE)
 
+[bolt]: https://www.logitech.com/en-us/shop/p/logi-bolt-usb-receiver
 [pnputil]: https://learn.microsoft.com/en-us/windows-hardware/drivers/devtest/pnputil-command-syntax#restart-device
-[script]: mx-master-4-revert-horizontal-scroll/Flip-Horizontal-Scroll.ps1
+[script]: Flip-Horizontal-Scroll.ps1

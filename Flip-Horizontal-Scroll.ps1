@@ -1,7 +1,6 @@
 [CmdletBinding(SupportsShouldProcess, DefaultParameterSetName = 'Automatic')]
 param(
     [Parameter(Mandatory, ParameterSetName = 'Explicit')]
-    [ValidateNotNullOrEmpty()]
     [string]$InstanceId,
 
     [Parameter(Mandatory, ParameterSetName = 'Guided')]
@@ -107,13 +106,20 @@ function Find-ReconnectedMouse {
     $returned[0]
 }
 
+function Confirm-ScrollChange {
+    [CmdletBinding(SupportsShouldProcess)]
+    param([string]$Target, [string]$Action)
+
+    $PSCmdlet.ShouldProcess($Target, $Action)
+}
+
 Write-Information 'Looking for the MX Master 4 among connected Windows mouse interfaces.' -InformationAction Continue
 $presentMice = @(Get-ConnectedMouse)
 if ($presentMice.Count -eq 0) {
     throw 'Windows reports no connected mouse interfaces.'
 }
 
-if ($PSCmdlet.ParameterSetName -eq 'Explicit') {
+if ($InstanceId) {
     $candidates = @($presentMice | Where-Object InstanceId -eq $InstanceId)
     $method = 'explicit instance ID'
 } elseif ($Identify) {
@@ -123,6 +129,17 @@ if ($PSCmdlet.ParameterSetName -eq 'Explicit') {
     $candidates = @(Find-MxMasterMouse -Mice $presentMice)
     $method = 'MX Master 4 device name'
 
+    # Windows exposes this Bolt receiver as a generic mouse interface.
+    $boltPattern = '^HID\\VID_046D&PID_C548(?:&|\\)'
+    if ($candidates.Count -eq 0 -and ($presentMice.InstanceId -match $boltPattern)) {
+        Write-Information 'Windows reports a Logi Bolt receiver. Unplug and reconnect the receiver for your MX Master 4 when prompted.' -InformationAction Continue
+        $receiver = Find-ReconnectedMouse -Connected $presentMice
+        if ($receiver.InstanceId -notmatch $boltPattern) {
+            throw 'The reconnected mouse interface does not belong to the detected Logi Bolt receiver.'
+        }
+        $candidates = @($receiver)
+        $method = 'Logi Bolt receiver disconnect and reconnect'
+    }
 }
 
 if ($candidates.Count -eq 0) {
@@ -147,8 +164,7 @@ if ($null -ne $properties) {
     $current = $properties.PSObject.Properties[$name]
 }
 
-$explicitValue = $PSBoundParameters.ContainsKey('Value')
-$needsWrite = $null -eq $current -or ($explicitValue -and ($current.Value -isnot [int] -or $current.Value -ne $Value))
+$needsWrite = $null -eq $current -or $current.Value -isnot [int] -or $current.Value -ne $Value
 if (!$needsWrite) {
     Write-Information "$name already exists with value '$($current.Value)'. Skipping registry write." -InformationAction Continue
     if (!$RestartDevice) {
@@ -160,7 +176,7 @@ $action = 'Restart mouse interface'
 if ($needsWrite) {
     $action = "Set $name to DWORD $Value and restart mouse interface"
 }
-if (!$PSCmdlet.ShouldProcess($selectedId, $action)) {
+if (!(Confirm-ScrollChange -Target $selectedId -Action $action)) {
     return
 }
 
@@ -176,26 +192,8 @@ if ($null -eq $verified -or $verified.Class -ne 'Mouse' -or $verified.InstanceId
 }
 
 if ($needsWrite) {
-    if ($explicitValue) {
-        Set-ItemProperty -LiteralPath $key -Name $name -Type DWord -Value $Value -Confirm:$false -ErrorAction Stop
-    } else {
-        try {
-            New-ItemProperty -LiteralPath $key -Name $name -PropertyType DWord -Value $Value -Confirm:$false -ErrorAction Stop |
-                Out-Null
-        } catch {
-            if ($_.CategoryInfo.Category -ne 'ResourceExists') {
-                throw
-            }
-            Write-Information "$name already exists. Skipping registry write." -InformationAction Continue
-            if (!$RestartDevice) {
-                return
-            }
-            $needsWrite = $false
-        }
-    }
-    if ($needsWrite) {
-        Write-Information "Saved $name as DWORD $Value." -InformationAction Continue
-    }
+    Set-ItemProperty -LiteralPath $key -Name $name -Type DWord -Value $Value -Confirm:$false -ErrorAction Stop
+    Write-Information "Saved $name as DWORD $Value." -InformationAction Continue
 }
 
 Write-Information "Restarting mouse interface $selectedId." -InformationAction Continue
