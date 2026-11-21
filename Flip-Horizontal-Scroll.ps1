@@ -83,27 +83,53 @@ function Find-MxMasterMouse {
 }
 
 function Find-ReconnectedMouse {
-    param([object[]]$Connected)
+    param([object[]]$Connected, [switch]$BoltReceiver)
 
-    Read-Host 'Disconnect only the MX Master 4 or unplug its Bolt receiver. Wait for Windows, then press Enter' | Out-Null
-    $disconnected = @(Get-ConnectedMouse)
-    $disconnectedIds = @(foreach ($mouse in $disconnected) { $mouse.InstanceId })
-    $removed = @($Connected | Where-Object InstanceId -notin $disconnectedIds)
-    $unexpected = @($disconnected | Where-Object InstanceId -notin $Connected.InstanceId)
-    if ($removed.Count -ne 1 -or $unexpected.Count -ne 0) {
-        throw "Expected exactly one mouse interface to disappear and no new ones to appear. Saw $($removed.Count) disappear and $($unexpected.Count) appear. Reconnect the mouse and try again."
+    $disconnectInstruction = 'Disconnect the MX Master 4 or unplug its Bolt receiver'
+    if ($BoltReceiver) {
+        $disconnectInstruction = 'Unplug the USB Bolt receiver used by your MX Master 4'
     }
 
-    Read-Host 'Reconnect the mouse or plug its receiver back into the same port. Wait for Windows, then press Enter' | Out-Null
-    $reconnected = @(Get-ConnectedMouse)
-    $reconnectedIds = @(foreach ($mouse in $reconnected) { $mouse.InstanceId })
-    $returned = @($reconnected | Where-Object InstanceId -notin $disconnectedIds)
-    $lost = @($disconnected | Where-Object InstanceId -notin $reconnectedIds)
-    if ($returned.Count -ne 1 -or $lost.Count -ne 0 -or $returned[0].InstanceId -ne $removed[0].InstanceId) {
-        throw 'Could not confirm that the same single mouse interface came back. Try again with the receiver in the same port, or specify an exact present mouse ID with -InstanceId.'
+    while ($true) {
+        $answer = Read-Host "$disconnectInstruction. Press Enter to check or Q to cancel"
+        if ($null -eq $answer -or $answer.Trim() -eq 'Q') {
+            return
+        }
+        $disconnected = @(Get-ConnectedMouse)
+        $disconnectedIds = @(foreach ($mouse in $disconnected) { $mouse.InstanceId })
+        $removed = @($Connected | Where-Object InstanceId -notin $disconnectedIds)
+        $unexpected = @($disconnected | Where-Object InstanceId -notin $Connected.InstanceId)
+        if ($removed.Count -gt 1 -or $unexpected.Count -gt 0) {
+            throw 'Other mouse interfaces changed too. Reconnect your devices and try again with only the MX Master 4 or its receiver.'
+        }
+        if ($removed.Count -eq 1) {
+            break
+        }
+        Write-Warning "Windows still sees the same mouse interfaces. $disconnectInstruction, then try again."
     }
 
-    $returned[0]
+    $reconnectInstruction = 'Reconnect the mouse or plug its receiver back into the same USB port'
+    if ($BoltReceiver) {
+        $reconnectInstruction = 'Plug the Bolt receiver back into the same USB port'
+    }
+    while ($true) {
+        $answer = Read-Host "$reconnectInstruction. Press Enter to check or Q to cancel"
+        if ($null -eq $answer -or $answer.Trim() -eq 'Q') {
+            return
+        }
+        $reconnected = @(Get-ConnectedMouse)
+        $reconnectedIds = @(foreach ($mouse in $reconnected) { $mouse.InstanceId })
+        $returned = @($reconnected | Where-Object InstanceId -notin $disconnectedIds)
+        $lost = @($disconnected | Where-Object InstanceId -notin $reconnectedIds)
+        if ($returned.Count -gt 1 -or $lost.Count -gt 0 -or
+            ($returned.Count -eq 1 -and $returned[0].InstanceId -ne $removed[0].InstanceId)) {
+            throw 'Windows found a different set of mouse interfaces. Reconnect to the same USB port and try again, or specify the mouse with -InstanceId.'
+        }
+        if ($returned.Count -eq 1) {
+            return $returned[0]
+        }
+        Write-Warning "Windows has not detected the mouse again yet. $reconnectInstruction, wait a moment, then try again."
+    }
 }
 
 function Confirm-ScrollChange {
@@ -113,101 +139,120 @@ function Confirm-ScrollChange {
     $PSCmdlet.ShouldProcess($Target, $Action)
 }
 
-Write-Information 'Looking for the MX Master 4 among connected Windows mouse interfaces.' -InformationAction Continue
-$presentMice = @(Get-ConnectedMouse)
-if ($presentMice.Count -eq 0) {
-    throw 'Windows reports no connected mouse interfaces.'
-}
-
-if ($InstanceId) {
-    $candidates = @($presentMice | Where-Object InstanceId -eq $InstanceId)
-    $method = 'explicit instance ID'
-} elseif ($Identify) {
-    $candidates = @(Find-ReconnectedMouse -Connected $presentMice)
-    $method = 'disconnect and reconnect'
-} else {
-    $candidates = @(Find-MxMasterMouse -Mice $presentMice)
-    $method = 'MX Master 4 device name'
-
-    # Windows exposes this Bolt receiver as a generic mouse interface.
-    $boltPattern = '^HID\\VID_046D&PID_C548(?:&|\\)'
-    if ($candidates.Count -eq 0 -and ($presentMice.InstanceId -match $boltPattern)) {
-        Write-Information 'Windows reports a Logi Bolt receiver. Unplug and reconnect the receiver for your MX Master 4 when prompted.' -InformationAction Continue
-        $receiver = Find-ReconnectedMouse -Connected $presentMice
-        if ($receiver.InstanceId -notmatch $boltPattern) {
-            throw 'The reconnected mouse interface does not belong to the detected Logi Bolt receiver.'
-        }
-        $candidates = @($receiver)
-        $method = 'Logi Bolt receiver disconnect and reconnect'
+$global:LASTEXITCODE = 0
+try {
+    Write-Information 'Looking for the MX Master 4 among connected Windows mouse interfaces.' -InformationAction Continue
+    $presentMice = @(Get-ConnectedMouse)
+    if ($presentMice.Count -eq 0) {
+        throw 'Windows reports no connected mouse interfaces.'
     }
-}
 
-if ($candidates.Count -eq 0) {
-    $presentIds = $presentMice.InstanceId -join ', '
-    throw "Could not identify a connected target mouse. Run with -Identify or specify its exact ID with -InstanceId. Windows reports these mouse IDs: $presentIds"
-}
+    if ($InstanceId) {
+        $candidates = @($presentMice | Where-Object InstanceId -eq $InstanceId)
+        $method = 'explicit instance ID'
+    } else {
+        $candidates = @()
+        if (!$Identify) {
+            $candidates = @(Find-MxMasterMouse -Mice $presentMice)
+            $method = 'MX Master 4 device name'
+        }
 
-if ($candidates.Count -gt 1) {
-    $matchingIds = $candidates.InstanceId -join ', '
-    throw "Found $($candidates.Count) matching mouse interfaces. Run with -Identify or quote one of these IDs with -InstanceId: $matchingIds"
-}
+        # Windows exposes this Bolt receiver as a generic mouse interface.
+        $boltPattern = '^HID\\VID_046D&PID_C548(?:&|\\)'
+        $useBolt = !$Identify -and $candidates.Count -eq 0 -and ($presentMice.InstanceId -match $boltPattern)
+        if ($Identify -or $useBolt) {
+            $candidates = @(Find-ReconnectedMouse -Connected $presentMice -BoltReceiver:$useBolt)
+            if ($candidates.Count -eq 0) {
+                Write-Information 'Canceled before applying any changes.' -InformationAction Continue
+                return
+            }
+            if ($useBolt -and $candidates[0].InstanceId -notmatch $boltPattern) {
+                throw 'The interface you reconnected belongs to a different mouse. Try again with the USB Bolt receiver for your MX Master 4.'
+            }
+            $method = 'disconnect and reconnect'
+        }
+    }
 
-$name = 'FlipFlopHScroll'
-$selectedId = $candidates[0].InstanceId
-$key = "HKLM:\SYSTEM\CurrentControlSet\Enum\$selectedId\Device Parameters"
-Write-Information "Found $selectedId using $method." -InformationAction Continue
-Write-Information "Checking for $name at $key" -InformationAction Continue
-$properties = Get-ItemProperty -LiteralPath $key -ErrorAction Stop
+    if ($candidates.Count -eq 0) {
+        Write-Verbose "Connected mouse IDs: $($presentMice.InstanceId -join ', ')"
+        throw 'Windows could not identify the mouse. Reconnect it and try again, or run the local script with -Identify.'
+    }
 
-$current = $null
-if ($null -ne $properties) {
-    $current = $properties.PSObject.Properties[$name]
-}
+    if ($candidates.Count -gt 1) {
+        Write-Verbose "Matching mouse IDs: $($candidates.InstanceId -join ', ')"
+        throw 'Windows found more than one matching mouse. Run the local script with -Identify or select it with -InstanceId.'
+    }
 
-$needsWrite = $null -eq $current -or $current.Value -isnot [int] -or $current.Value -ne $Value
-if (!$needsWrite) {
-    Write-Information "$name already exists with value '$($current.Value)'. Skipping registry write." -InformationAction Continue
-    if (!$RestartDevice) {
+    $name = 'FlipFlopHScroll'
+    $selectedId = $candidates[0].InstanceId
+    $key = "HKLM:\SYSTEM\CurrentControlSet\Enum\$selectedId\Device Parameters"
+    Write-Information "Found $selectedId using $method." -InformationAction Continue
+    Write-Information "Checking for $name at $key" -InformationAction Continue
+    $properties = Get-ItemProperty -LiteralPath $key -ErrorAction Stop
+
+    $current = $null
+    if ($null -ne $properties) {
+        $current = $properties.PSObject.Properties[$name]
+    }
+
+    $needsWrite = $null -eq $current -or $current.Value -isnot [int] -or $current.Value -ne $Value
+    if (!$needsWrite) {
+        Write-Information "$name already exists with value '$($current.Value)'. Skipping registry write." -InformationAction Continue
+        if (!$RestartDevice) {
+            return
+        }
+    }
+
+    $action = 'Restart mouse interface'
+    if ($needsWrite) {
+        $action = "Set $name to DWORD $Value and restart mouse interface"
+    }
+    if (!(Confirm-ScrollChange -Target $selectedId -Action $action)) {
         return
     }
-}
 
-$action = 'Restart mouse interface'
-if ($needsWrite) {
-    $action = "Set $name to DWORD $Value and restart mouse interface"
-}
-if (!(Confirm-ScrollChange -Target $selectedId -Action $action)) {
-    return
-}
-
-$pnpUtil = (Get-Command -Name (Join-Path $env:SystemRoot 'System32\pnputil.exe') -CommandType Application -ErrorAction Stop).Path
-if (-not (& $pnpUtil /? | Select-String -SimpleMatch '/restart-device' -Quiet)) {
-    throw 'This Windows version does not provide PnPUtil /restart-device. Automatic device restart requires Windows 10 version 2004 or newer.'
-}
-
-# Verify the selected interface is still connected before changing its settings.
-$verified = Get-PnpDevice -InstanceId $selectedId -PresentOnly -ErrorAction Stop
-if ($null -eq $verified -or $verified.Class -ne 'Mouse' -or $verified.InstanceId -ne $selectedId) {
-    throw 'The selected mouse interface is no longer present.'
-}
-
-if ($needsWrite) {
-    Set-ItemProperty -LiteralPath $key -Name $name -Type DWord -Value $Value -Confirm:$false -ErrorAction Stop
-    Write-Information "Saved $name as DWORD $Value." -InformationAction Continue
-}
-
-Write-Information "Restarting mouse interface $selectedId." -InformationAction Continue
-try {
-    $restartOutput = & $pnpUtil /restart-device $selectedId
-    $restartExitCode = $LASTEXITCODE
-    foreach ($line in $restartOutput) {
-        Write-Information $line -InformationAction Continue
+    $pnpUtil = (Get-Command -Name (Join-Path $env:SystemRoot 'System32\pnputil.exe') -CommandType Application -ErrorAction Stop).Path
+    if (-not (& $pnpUtil /? | Select-String -SimpleMatch '/restart-device' -Quiet)) {
+        throw 'This Windows version does not provide PnPUtil /restart-device. Automatic device restart requires Windows 10 version 2004 or newer.'
     }
-    if ($restartExitCode -eq 3010) {
-        Write-Warning 'Windows reports that a reboot is required to finish the device restart.'
-    } elseif ($restartExitCode -ne 0) {
-        throw "PnPUtil returned exit code $restartExitCode."
+
+    # Verify the selected interface is still connected before changing its settings.
+    $verified = Get-PnpDevice -InstanceId $selectedId -PresentOnly -ErrorAction Stop
+    if ($null -eq $verified -or $verified.Class -ne 'Mouse' -or $verified.InstanceId -ne $selectedId) {
+        throw 'The selected mouse interface is no longer present.'
     }
-} catch {
-    throw "Could not restart the mouse interface. Run the script as administrator with -RestartDevice to retry. $($_.Exception.Message)"
+
+    if ($needsWrite) {
+        Set-ItemProperty -LiteralPath $key -Name $name -Type DWord -Value $Value -Confirm:$false -ErrorAction Stop
+        Write-Information "Saved $name as DWORD $Value." -InformationAction Continue
+    }
+
+    Write-Information "Restarting mouse interface $selectedId." -InformationAction Continue
+    try {
+        $restartOutput = & $pnpUtil /restart-device $selectedId
+        $restartExitCode = $LASTEXITCODE
+        foreach ($line in $restartOutput) {
+            Write-Information $line -InformationAction Continue
+        }
+        if ($restartExitCode -eq 3010) {
+            Write-Warning 'Windows reports that a reboot is required to finish the device restart.'
+        } elseif ($restartExitCode -ne 0) {
+            throw "PnPUtil returned exit code $restartExitCode."
+        }
+    } catch {
+        throw "Could not restart the mouse interface. Run the script as administrator with -RestartDevice to retry. $($_.Exception.Message)"
+    }
+}
+catch {
+    $global:LASTEXITCODE = 1
+    if ($PSBoundParameters['ErrorAction'] -eq 'Stop') {
+        throw
+    }
+
+    $reason = $_.Exception.Message
+    if ($_.CategoryInfo.Category -in @('PermissionDenied', 'SecurityError')) {
+        Write-Verbose $reason
+        $reason = 'Administrator access is required. Open PowerShell as Administrator and run the command again.'
+    }
+    Write-Warning "Could not finish: $reason"
 }

@@ -10,6 +10,11 @@ needs administrator privileges to write the device setting under `HKLM` and
 restart the mouse interface. The restart requires Windows 10 version 2004 or
 later, or Windows 11. [Microsoft PnPUtil documentation][pnputil]
 
+The Logi Options+ thumb-wheel direction setting can conflict with this script.
+Use one method to control horizontal scrolling. If you prefer to set the
+direction in Logi Options+, restore the Windows setting with `-Value 0`.
+[Logitech thumb-wheel settings][options-plus]
+
 This downloads and runs the current GitHub version in memory. Review the
 [PowerShell script][script] before running it.
 
@@ -19,7 +24,9 @@ irm 'https://github.com/softerist/logi/raw/main/Flip-Horizontal-Scroll.ps1' | ie
 
 If Windows shows the Logi Bolt receiver in place of the mouse name, the script
 prompts you to unplug the receiver and reconnect it to the same USB port. It
-checks that the same mouse interface disappears and returns.
+checks that the same mouse interface disappears and returns. If Windows is
+slow to detect the change, wait a moment and press Enter to check again.
+Press Q at either prompt to cancel.
 
 The mouse may stop responding briefly while Windows restarts its interface.
 Reboot if the script reports that Windows requires it. Test the thumb wheel in
@@ -78,5 +85,6 @@ the same device selection.
 [MIT](LICENSE)
 
 [bolt]: https://www.logitech.com/en-us/shop/p/logi-bolt-usb-receiver
+[options-plus]: https://support.logi.com/hc/en-ca/articles/28321445268247-Getting-Started-MX-Master-4
 [pnputil]: https://learn.microsoft.com/en-us/windows-hardware/drivers/devtest/pnputil-command-syntax#restart-device
 [script]: Flip-Horizontal-Scroll.ps1
