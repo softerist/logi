@@ -187,7 +187,7 @@ try {
     $selectedId = $candidates[0].InstanceId
     $key = "HKLM:\SYSTEM\CurrentControlSet\Enum\$selectedId\Device Parameters"
     Write-Information "Found $selectedId using $method." -InformationAction Continue
-    Write-Information "Checking for $name at $key" -InformationAction Continue
+    Write-Verbose "Checking for $name at $key"
     $properties = Get-ItemProperty -LiteralPath $key -ErrorAction Stop
 
     $current = $null
@@ -197,7 +197,8 @@ try {
 
     $needsWrite = $null -eq $current -or $current.Value -isnot [int] -or $current.Value -ne $Value
     if (!$needsWrite) {
-        Write-Information "$name already exists with value '$($current.Value)'. Skipping registry write." -InformationAction Continue
+        $setting = if ($Value -eq 1) { 'The option to reverse horizontal scrolling' } else { 'Standard horizontal scrolling' }
+        Write-Information "$setting is already set for this mouse." -InformationAction Continue
         if (!$RestartDevice) {
             return
         }
